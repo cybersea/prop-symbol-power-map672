@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset=utf-8 />
+    <title>Power Compare</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+
+    <script src="http://cdn.leafletjs.com/leaflet/v0.7.7/leaflet.js"></script>
+
+    <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet/v0.7.7/leaflet.css" />
+    <link href='http://fonts.googleapis.com/css?family=Lato' rel='stylesheet' type='text/css'>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: whitesmoke;
+            font-family: Lato, sans-serif;
+            color: #0D0000;
+        }
+        
+        header {
+            padding: 6px 10%;
+        }
+        
+        h1 {
+            display: inline-block;
+            margin-right: 20px;
+            color: #001323;
+        }
+        
+        h2 {
+            display: inline-block;
+            color: #001323;
+        }
+        
+        #map {
+            width: 80%;
+            height: 540px;
+            margin: 10px auto;
+        }
+        
+        footer {
+            padding: 6px 10%;
+            width: 80%;
+        }
+        
+        p {
+            font-size: 1em;
+            color: #001323;
+        }
+        
+        .leaflet-control-layers-expanded {
+            background: #000000;
+        }
+    </style>
+
+</head>
+
+<body>
+    <header>
+        <h1>Nuclear, Wind, and Solar Power</h1>
+        <h2>Contrasts in Capacity</h2>
+    </header>
+
+    <div id='map'></div>
+
+    <footer>
+        <p>Map authored by Allison Bailey</p>
+        <p>Power plant data from <a href="http://www.eia.gov/electricity/data/eia923/" target="_blank">EIA's Form 923</a></p>
+    </footer>
+
+    <script src="power-plants.js"></script>
+    <script>
+        var map = L.map('map', {
+            center: [36, -94],
+            zoom: 4,
+        });
+
+        var tiles = L.tileLayer('http://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="http://cartodb.com/attributions">CartoDB</a>',
+            subdomains: 'abcd',
+            maxZoom: 19
+        });
+
+        tiles.addTo(map);
+
+        var commonStyles = {
+            weight: 1,
+            stroke: 1,
+            fillOpacity: .8
+        }
+
+        var layerInfo = {
+            nuclearLayer: {
+                source: "Nuclear",
+                color: '#ffffff'
+            },
+            windLayer: {
+                source: "Wind",
+                color: '#93bbd0'
+            },
+            solarLayer: {
+                source: "Solar",
+                color: '#ffc125'
+            },
+        };
+
+        var geoJsonLayers = {};
+
+        for (var layer in layerInfo) {
+            geoJsonLayers[layer] = L.geoJson(plants, {
+                pointToLayer: function (feature, latlng) {
+                    return L.circleMarker(latlng, commonStyles);
+                },
+                filter: function (feature) {
+                    if (feature.properties.fuel_source[layerInfo[layer].source]) {
+                        return feature;
+                    }
+                },
+                style: function (feature) {
+                    return {
+                        color: layerInfo[layer].color,
+                        fillColor: layerInfo[layer].color,
+                        radius: getRadius(feature.properties.fuel_source[layerInfo[layer].source])
+                    }
+                }
+            }).addTo(map);
+        }
+
+        function getRadius(val) {
+            var radius = Math.sqrt(val / Math.PI);
+            return radius * .8;
+        }
+
+        var sourcesLabels = {
+            "<b style='color:#ffffff'>Nuclear</b>": geoJsonLayers.nuclearLayer,
+            "<b style='color:#93bbd0'>Wind</b>": geoJsonLayers.windLayer,
+            "<b style='color:#ffc125'>Solar</b>": geoJsonLayers.solarLayer
+        }
+
+        L.control.layers(null, sourcesLabels, {
+            collapsed: false
+        }).addTo(map);
+
+        // Feature group to hold the circular spotlight created from click event
+        var spotlight = L.featureGroup()
+
+
+        map.on('click', function (e) {
+            var spot_fuels = {}; // Initialize object for fuel types and total MW inside spotlight 
+
+            // Add proportional circular symbols for each type of power generation
+            for (var lyr in geoJsonLayers) {
+                geoJsonLayers[lyr].eachLayer(function (layer) {
+                    var name = layer.feature.properties.plant_name;
+                    var fuel = layerInfo[lyr].source;
+                    var distance = e.latlng.distanceTo(layer.getLatLng()) / 1000; // meters to km
+                    if (distance > 500) {
+                        layer.setStyle({
+                            stroke: false,
+                            fill: false
+                        });
+                    } else {
+                        layer.setStyle({
+                            stroke: true,
+                            fill: true
+                        });
+                        // sum up capacity by fuel source
+                        for (var src in layer.feature.properties.fuel_source) {
+                            var capacity = layer.feature.properties.fuel_source[src];
+                            if (spot_fuels[src]) {
+                                spot_fuels[src] += capacity;
+                            } else {
+                                spot_fuels[src] = capacity;
+                            }
+                            spot_fuels[src] += capacity;
+                        }
+                        layer.bindPopup("Name: <b>" + name + "</b><br>" +
+                            "Fuel: <b>" + fuel + "</b><br>" +
+                            "Distance: <b>" + distance.toLocaleString() +
+                            " km</b><br>from the click point.");
+                    }
+                });
+            }
+            // Add a circular "spotlight" to highlight region of interest
+            var spot = L.circle(e.latlng, 500000, {
+                color: "#4d4d4d",
+                weight: 3,
+            });
+            spotlight.clearLayers(); // Remove previous spotlight circle from feature group
+            spotlight.addLayer(spot).addTo(map).bringToBack();
+            var popup_content = "";
+            for (var source in spot_fuels) {
+                popup_content += "<b>" + source + ": </b>" + spot_fuels[source].toLocaleString() + " MW<br>";
+            }
+            spotlight.bindPopup(popup_content);
+        });
+    </script>
+</body>
+
+</html>
